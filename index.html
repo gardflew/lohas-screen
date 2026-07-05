@@ -30,9 +30,9 @@
 </div>
 
 <div class="section-title mtr-sec">港鐵將軍澳綫 (康城站)</div>
-<div id="mtr-list">正在直連港鐵 API...</div>
+<div id="mtr-list">正在獲取港鐵班次...</div>
 
-<div class="section-title bus-sec">康城開出巴士 (全直連整合)</div>
+<div class="section-title bus-sec">康城開出巴士 (實時整合)</div>
 <div id="bus-list">正在獲取巴士班次...</div>
 
 <div class="status" id="update-status">正在初始化...</div>
@@ -47,41 +47,51 @@
     }
     setInterval(updateClock, 1000); updateClock();
 
-    // 2. 港鐵原始 API 直連
+    // 安全時間轉換器
+    function parseToSafeDate(dateStr) {
+        if (!dateStr) return new Date();
+        var tPart = dateStr.split('+')[0]; 
+        var cleanStr = tPart.replace('T', ' ').replace(/-/g, '/');
+        return new Date(cleanStr);
+    }
+
+    // 換用完全無跨域限制、不限流量的公用中轉網址
+    var PROXY = "https://corsproxy.io/?url=";
+
+    // 2. 港鐵獲取
     function fetchMTR() {
         var mtrList = document.getElementById('mtr-list');
-        var url = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKO&sta=LHP';
+        var targetUrl = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKO&sta=LHP';
+        
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', url, true);
+        xhr.open('GET', PROXY + encodeURIComponent(targetUrl), true);
         xhr.onreadystatechange = function () {
-            if (xhr.readyState === 4) {
-                if (xhr.status === 200) {
-                    try {
-                        var json = JSON.parse(xhr.responseText);
-                        var schedule = json.data['TKO-LHP'].UP;
-                        if (!schedule || schedule.length === 0) {
-                            mtrList.innerHTML = '<div class="eta-row"><div class="destination">非行車時間 / 暫無班次</div></div>';
-                            return;
-                        }
-                        var html = '';
-                        var maxRows = schedule.length > 2 ? 2 : schedule.length;
-                        for (var i = 0; i < maxRows; i++) {
-                            var train = schedule[i];
-                            var diffMins = Math.max(0, parseInt(train.ttnt));
-                            var dest = train.dest === "NOP" ? "北角" : (train.dest === "TIK" ? "調景嶺" : train.dest);
-                            var timeText = diffMins === 0 ? "即將到站" : diffMins + " 分鐘";
-                            html += '<div class="eta-row"><div class="route-badge mtr-badge">MTR</div><div class="destination">往 ' + dest + '</div><div class="time-left">' + timeText + '</div></div>';
-                        }
-                        mtrList.innerHTML = html;
-                    } catch (e) { 
-                        mtrList.innerHTML = '<div class="eta-row"><div class="destination" style="color:#aaa;">港鐵數據部署中（請用網站環境查看）</div></div>'; 
+            if (xhr.readyState === 4 && xhr.status === 200) {
+                try {
+                    var json = JSON.parse(xhr.responseText);
+                    var schedule = json.data['TKO-LHP'].UP;
+                    if (!schedule || schedule.length === 0) {
+                        mtrList.innerHTML = '<div class="eta-row"><div class="destination">非行車時間 / 暫無班次</div></div>';
+                        return;
                     }
+                    var html = '';
+                    var maxRows = schedule.length > 2 ? 2 : schedule.length;
+                    for (var i = 0; i < maxRows; i++) {
+                        var train = schedule[i];
+                        var diffMins = train.ttnt ? parseInt(train.ttnt) : Math.max(0, Math.floor((parseToSafeDate(train.time) - new Date()) / 1000 / 60));
+                        var dest = train.dest === "NOP" ? "北角" : (train.dest === "TIK" ? "調景嶺" : train.dest);
+                        var timeText = diffMins <= 0 ? "即將到站" : diffMins + " 分鐘";
+                        html += '<div class="eta-row"><div class="route-badge mtr-badge">MTR</div><div class="destination">往 ' + dest + '</div><div class="time-left">' + timeText + '</div></div>';
+                    }
+                    mtrList.innerHTML = html;
+                } catch (e) { 
+                    mtrList.innerHTML = '<div class="eta-row"><div class="destination" style="color:#aaa;">暫無港鐵班次</div></div>'; 
                 }
             }
         }; xhr.send();
     }
 
-    // 3. 巴士配置 (全直連 4 條康城主力線)
+    // 3. 巴士配置
     var BUS_CONFIG = [
         { company: 'kmb', route: '98', url: 'https://data.etabus.gov.hk/v1/transport/kmb/eta/B86A414064EE18D6/98/O', dest: '牛頭角站' },
         { company: 'ctb', route: '790', url: 'https://rt.data.gov.hk/v1/transport/citybus/eta/ctb/003253/790', dest: '尖沙咀東' },
@@ -97,7 +107,7 @@
         for (var i = 0; i < BUS_CONFIG.length; i++) {
             (function(config) {
                 var xhr = new XMLHttpRequest();
-                xhr.open('GET', config.url, true);
+                xhr.open('GET', PROXY + encodeURIComponent(config.url), true);
                 xhr.onreadystatechange = function() {
                     if (xhr.readyState === 4) {
                         if (xhr.status === 200) {
@@ -110,8 +120,8 @@
                                     list = list.filter(function(item) { return item.eta; });
                                 }
                                 if (list.length > 0) {
-                                    var diffMs = new Date(list[0].eta) - new Date();
-                                    var diffMins = Math.max(0, Math.floor(diffMs / 1000 / 60));
+                                    var targetTime = parseToSafeDate(list[0].eta);
+                                    var diffMins = Math.max(0, Math.floor((targetTime - new Date()) / 1000 / 60));
                                     allEtas.push({ company: config.company, route: config.route, dest: config.dest, mins: diffMins });
                                 }
                             } catch(e) {}
@@ -120,7 +130,7 @@
                         if (completedRequests === BUS_CONFIG.length) {
                             allEtas.sort(function(a, b) { return a.mins - b.mins; });
                             if (allEtas.length === 0) {
-                                busList.innerHTML = '<div class="eta-row"><div class="destination">暫無巴士班次 (班次稀疏中)</div></div>';
+                                busList.innerHTML = '<div class="eta-row"><div class="destination">暫無巴士班次</div></div>';
                                 return;
                             }
                             var html = '';
