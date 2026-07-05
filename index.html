@@ -1,11 +1,103 @@
-// 同步更新時間
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日出康城實時交通看板</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 15px;
+            overflow: hidden;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid #333;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .title { font-size: 28px; font-weight: bold; color: #d0bfff; } /* 康城紫 */
+        .clock { font-size: 32px; font-weight: bold; color: #00e5ff; }
+        
+        .section-title {
+            font-size: 20px;
+            color: #aaa;
+            background: #111;
+            padding: 5px 10px;
+            border-left: 5px solid #fff;
+            margin-top: 15px;
+        }
+        .section-title.mtr-sec { border-left-color: #7d4199; } /* 港鐵紫 */
+        .section-title.bus-sec { border-left-color: #ff9f0a; } /* 巴士橙 */
+
+        .eta-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #222;
+            padding: 12px 5px;
+        }
+        .route-badge {
+            font-size: 32px;
+            font-weight: bold;
+            width: 90px;
+        }
+        .mtr-badge { color: #d0bfff; }
+        .kmb-badge { color: #ff3b30; } /* 九巴紅 */
+        .ctb-badge { color: #ffd60a; } /* 城巴黃 */
+
+        .destination {
+            font-size: 24px;
+            flex-grow: 1;
+            margin-left: 15px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .time-left {
+            font-size: 32px;
+            font-weight: bold;
+            color: #30d158; /* 綠色 */
+            text-align: right;
+            min-width: 120px;
+        }
+        .status {
+            text-align: center;
+            color: #444;
+            font-size: 14px;
+            margin-top: 25px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="title">日出康城 LOHAS Park</div>
+    <div class="clock" id="current-time">00:00:00</div>
+</div>
+
+<div class="section-title mtr-sec">港鐵將軍澳綫 (康城站)</div>
+<div id="mtr-list">正在獲取港鐵班次...</div>
+
+<div class="section-title bus-sec">康城開出巴士 (環保大道 / 總站)</div>
+<div id="bus-list">正在獲取巴士班次...</div>
+
+<div class="status" id="update-status">正在初始化...</div>
+
+<script>
+    // 1. 同步更新時間
     function updateClock() {
         const now = new Date();
         document.getElementById('current-time').innerText = now.toLocaleTimeString('zh-HK', { hour12: false });
     }
     setInterval(updateClock, 1000);
 
-    // ================= 1. 港鐵數據抓取 =================
+    // 2. 港鐵數據抓取 (康城站往北角/調景嶺)
     async function fetchMTR() {
         const mtrList = document.getElementById('mtr-list');
         const url = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKO&sta=LHP';
@@ -21,6 +113,7 @@
             }
 
             let html = '';
+            // 只顯示最近 2 班車
             schedule.slice(0, 2).forEach(train => {
                 const diffMins = Math.max(0, parseInt(train.ttnt));
                 let dest = train.dest === "NOP" ? "北角" : (train.dest === "TIK" ? "調景嶺" : train.dest);
@@ -40,7 +133,7 @@
         }
     }
 
-    // ================= 2. 巴士數據抓取 =================
+    // 3. 巴士數據配置 (已包含 98, 790, 795X, 793)
     const BUS_CONFIG = [
         { company: 'kmb', route: '98', dir: 'O', stop: 'B86A414064EE18D6', dest: '牛頭角站' },
         { company: 'ctb', route: '790', dir: 'O', stop: '003253', dest: '尖沙咀東' },
@@ -89,7 +182,7 @@
             }
         }
 
-        // 按到站時間由近到遠排序
+        // 依據時間由近到遠排序
         allEtas.sort((a, b) => a.mins - b.mins);
 
         if (allEtas.length === 0) {
@@ -98,33 +191,4 @@
         }
 
         let html = '';
-        allEtas.forEach(bus => {
-            let badgeClass = bus.company === 'kmb' ? 'kmb-badge' : 'ctb-badge';
-            let companyName = bus.company === 'kmb' ? '九巴' : '城巴';
-            let timeText = bus.mins === 0 ? "到站中" : ${bus.mins} 分鐘;
-            
-            html += `
-                <div class="eta-row">
-                    <div class="route-badge ${badgeClass}">${bus.route}</div>
-                    <div class="destination">${bus.dest} (${companyName})</div>
-                    <div class="time-left">${timeText}</div>
-                </div>
-            `;
-        });
-        busList.innerHTML = html;
-    }
-
-    // ================= 3. 核心控制流程 =================
-    function updateAllData() {
-        document.getElementById('update-status').innerText = '正在更新數據...';
-        Promise.all([fetchMTR(), fetchBus()]).then(() => {
-            const now = new Date();
-            document.getElementById('update-status').innerText = 最後更新: ${now.toLocaleTimeString()};
-        }).catch(() => {
-            document.getElementById('update-status').innerText = 更新出錯，等待下次重試;
-        });
-    }
-
-    // 初始化與定時刷新 (每 30 秒更新一次)
-    updateAllData();
-    setInterval(updateAllData, 30000);
+        allEt
