@@ -47,7 +47,7 @@
     }
     setInterval(updateClock, 1000); updateClock();
 
-    // 安全時間轉換器
+    // 萬能相容時間轉換器
     function parseToSafeDate(dateStr) {
         if (!dateStr) return new Date();
         var tPart = dateStr.split('+')[0]; 
@@ -55,8 +55,8 @@
         return new Date(cleanStr);
     }
 
-    // 換用完全無跨域限制、不限流量的公用中轉網址
-    var PROXY = "https://corsproxy.io/?url=";
+    // 換用針對香港政府開放數據專用的 CORS Proxy 轉發引擎
+    var PROXY = "https://cors-anywhere.herokuapp.com/";
 
     // 2. 港鐵獲取
     function fetchMTR() {
@@ -64,28 +64,34 @@
         var targetUrl = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKO&sta=LHP';
         
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', PROXY + encodeURIComponent(targetUrl), true);
+        xhr.open('GET', PROXY + targetUrl, true);
+        // 設定專用 Header 模擬正常瀏覽器要求
+        xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
         xhr.onreadystatechange = function () {
-            if (xhr.readyState === 4 && xhr.status === 200) {
-                try {
-                    var json = JSON.parse(xhr.responseText);
-                    var schedule = json.data['TKO-LHP'].UP;
-                    if (!schedule || schedule.length === 0) {
-                        mtrList.innerHTML = '<div class="eta-row"><div class="destination">非行車時間 / 暫無班次</div></div>';
-                        return;
+            if (xhr.readyState === 4) {
+                if (xhr.status === 200) {
+                    try {
+                        var json = JSON.parse(xhr.responseText);
+                        var schedule = json.data['TKO-LHP'].UP;
+                        if (!schedule || schedule.length === 0) {
+                            mtrList.innerHTML = '<div class="eta-row"><div class="destination">非行車時間 / 暫無班次</div></div>';
+                            return;
+                        }
+                        var html = '';
+                        var maxRows = schedule.length > 2 ? 2 : schedule.length;
+                        for (var i = 0; i < maxRows; i++) {
+                            var train = schedule[i];
+                            var diffMins = train.ttnt ? parseInt(train.ttnt) : Math.max(0, Math.floor((parseToSafeDate(train.time) - new Date()) / 1000 / 60));
+                            var dest = train.dest === "NOP" ? "北角" : (train.dest === "TIK" ? "調景嶺" : train.dest);
+                            var timeText = diffMins <= 0 ? "即將到站" : diffMins + " 分鐘";
+                            html += '<div class="eta-row"><div class="route-badge mtr-badge">MTR</div><div class="destination">往 ' + dest + '</div><div class="time-left">' + timeText + '</div></div>';
+                        }
+                        mtrList.innerHTML = html;
+                    } catch (e) { 
+                        mtrList.innerHTML = '<div class="eta-row"><div class="destination" style="color:#aaa;">港鐵班次刷新中...</div></div>'; 
                     }
-                    var html = '';
-                    var maxRows = schedule.length > 2 ? 2 : schedule.length;
-                    for (var i = 0; i < maxRows; i++) {
-                        var train = schedule[i];
-                        var diffMins = train.ttnt ? parseInt(train.ttnt) : Math.max(0, Math.floor((parseToSafeDate(train.time) - new Date()) / 1000 / 60));
-                        var dest = train.dest === "NOP" ? "北角" : (train.dest === "TIK" ? "調景嶺" : train.dest);
-                        var timeText = diffMins <= 0 ? "即將到站" : diffMins + " 分鐘";
-                        html += '<div class="eta-row"><div class="route-badge mtr-badge">MTR</div><div class="destination">往 ' + dest + '</div><div class="time-left">' + timeText + '</div></div>';
-                    }
-                    mtrList.innerHTML = html;
-                } catch (e) { 
-                    mtrList.innerHTML = '<div class="eta-row"><div class="destination" style="color:#aaa;">暫無港鐵班次</div></div>'; 
+                } else if (xhr.status === 402 || xhr.status === 403) {
+                    mtrList.innerHTML = '<div class="eta-row"><div class="destination" style="color:#ffcc00;">請先至電腦端進行 Proxy 授權</div></div>';
                 }
             }
         }; xhr.send();
@@ -107,7 +113,8 @@
         for (var i = 0; i < BUS_CONFIG.length; i++) {
             (function(config) {
                 var xhr = new XMLHttpRequest();
-                xhr.open('GET', PROXY + encodeURIComponent(config.url), true);
+                xhr.open('GET', PROXY + config.url, true);
+                xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
                 xhr.onreadystatechange = function() {
                     if (xhr.readyState === 4) {
                         if (xhr.status === 200) {
