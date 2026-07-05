@@ -21,7 +21,7 @@
             padding-bottom: 10px;
             margin-bottom: 15px;
         }
-        .title { font-size: 28px; font-weight: bold; color: #d0bfff; } /* 康城紫 */
+        .title { font-size: 28px; font-weight: bold; color: #d0bfff; }
         .clock { font-size: 32px; font-weight: bold; color: #00e5ff; }
         
         .section-title {
@@ -32,8 +32,8 @@
             border-left: 5px solid #fff;
             margin-top: 15px;
         }
-        .section-title.mtr-sec { border-left-color: #7d4199; } /* 港鐵紫 */
-        .section-title.bus-sec { border-left-color: #ff9f0a; } /* 巴士橙 */
+        .section-title.mtr-sec { border-left-color: #7d4199; }
+        .section-title.bus-sec { border-left-color: #ff9f0a; }
 
         .eta-row {
             display: flex;
@@ -48,8 +48,7 @@
             width: 90px;
         }
         .mtr-badge { color: #d0bfff; }
-        .kmb-badge { color: #ff3b30; } /* 九巴紅 */
-        .ctb-badge { color: #ffd60a; } /* 城巴黃 */
+        .kmb-badge { color: #ff3b30; }
 
         .destination {
             font-size: 24px;
@@ -62,7 +61,7 @@
         .time-left {
             font-size: 32px;
             font-weight: bold;
-            color: #30d158; /* 綠色 */
+            color: #30d158;
             text-align: right;
             min-width: 120px;
         }
@@ -84,7 +83,7 @@
 <div class="section-title mtr-sec">港鐵將軍澳綫 (康城站)</div>
 <div id="mtr-list">正在獲取港鐵班次...</div>
 
-<div class="section-title bus-sec">康城開出巴士 (環保大道 / 總站)</div>
+<div class="section-title bus-sec">康城開出巴士 (九巴專線)</div>
 <div id="bus-list">正在獲取巴士班次...</div>
 
 <div class="status" id="update-status">正在初始化...</div>
@@ -108,12 +107,11 @@
             const schedule = json.data['TKO-LHP'].UP;
             
             if(!schedule || schedule.length === 0) {
-                mtrList.innerHTML = '<div class="eta-row"><div class="destination">現時未有非繁忙時間服務或非載客列車</div></div>';
+                mtrList.innerHTML = '<div class="eta-row"><div class="destination">現時未有非繁忙時間服務</div></div>';
                 return;
             }
 
             let html = '';
-            // 只顯示最近 2 班車
             schedule.slice(0, 2).forEach(train => {
                 const diffMins = Math.max(0, parseInt(train.ttnt));
                 let dest = train.dest === "NOP" ? "北角" : (train.dest === "TIK" ? "調景嶺" : train.dest);
@@ -133,12 +131,10 @@
         }
     }
 
-    // 3. 巴士數據配置 (已包含 98, 790, 795X, 793)
+    // 3. 巴士數據配置 (純九巴路線，避開城巴 CORS 限制)
     const BUS_CONFIG = [
-        { company: 'kmb', route: '98', dir: 'O', stop: 'B86A414064EE18D6', dest: '牛頭角站' },
-        { company: 'ctb', route: '790', dir: 'O', stop: '003253', dest: '尖沙咀東' },
-        { company: 'ctb', route: '795X', dir: 'O', stop: '003253', dest: '蘇屋/旺角' },
-        { company: 'ctb', route: '793', dir: 'O', stop: '003253', dest: '蘇屋/九龍灣' }
+        { route: '98', dir: 'O', stop: 'B86A414064EE18D6', dest: '牛頭角站' },
+        { route: '98D', dir: 'O', stop: 'B86A414064EE18D6', dest: '尖沙咀東 (特別班次)' }
     ];
 
     async function fetchBus() {
@@ -147,22 +143,13 @@
 
         for (let config of BUS_CONFIG) {
             try {
-                let url = '';
-                if (config.company === 'kmb') {
-                    url = https://data.etabus.gov.hk/v1/transport/kmb/eta/${config.stop}/${config.route}/${config.dir};
-                } else {
-                    url = https://rt.data.gov.hk/v1/transport/citybus/eta/ctb/${config.stop}/${config.route};
-                }
-
+                // 使用九巴官方開放 API 接口
+                let url = https://data.etabus.gov.hk/v1/transport/kmb/eta/${config.stop}/${config.route}/${config.dir};
                 const response = await fetch(url);
                 const json = await response.json();
                 
                 if (json.data && json.data.length > 0) {
                     let filtered = json.data.filter(item => item.eta);
-                    
-                    if (config.company === 'ctb') {
-                        filtered = filtered.filter(item => item.dir === 'O'); 
-                    }
 
                     if (filtered.length > 0) {
                         let firstBus = filtered[0];
@@ -170,7 +157,6 @@
                         const diffMins = Math.max(0, Math.floor(diffMs / 1000 / 60));
                         
                         allEtas.push({
-                            company: config.company,
                             route: config.route,
                             dest: config.dest,
                             mins: diffMins
@@ -182,13 +168,42 @@
             }
         }
 
-        // 依據時間由近到遠排序
+        // 依據時間排序
         allEtas.sort((a, b) => a.mins - b.mins);
 
         if (allEtas.length === 0) {
-            busList.innerHTML = '<div class="eta-row"><div class="destination">暫無巴士班次</div></div>';
+            busList.innerHTML = '<div class="eta-row"><div class="destination">暫無巴士班次 (請注意班次服務時間)</div></div>';
             return;
         }
 
         let html = '';
-        allEt
+        allEtas.forEach(bus => {
+            let timeText = bus.mins === 0 ? "到站中" : ${bus.mins} 分鐘;
+            html += `
+                <div class="eta-row">
+                    <div class="route-badge kmb-badge">${bus.route}</div>
+                    <div class="destination">${bus.dest} (九巴)</div>
+                    <div class="time-left">${timeText}</div>
+                </div>
+            `;
+        });
+        busList.innerHTML = html;
+    }
+
+    // 4. 總控制更新程序
+    function updateAllData() {
+        document.getElementById('update-status').innerText = '正在更新數據...';
+        Promise.all([fetchMTR(), fetchBus()]).then(() => {
+            const now = new Date();
+            document.getElementById('update-status').innerText = 最後更新: ${now.toLocaleTimeString()};
+        }).catch(() => {
+            document.getElementById('update-status').innerText = 更新出錯;
+        });
+    }
+
+    updateAllData();
+    setInterval(updateAllData, 30000);
+</script>
+
+</body>
+</html>
