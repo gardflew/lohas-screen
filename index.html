@@ -1,0 +1,130 @@
+// 同步更新時間
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('current-time').innerText = now.toLocaleTimeString('zh-HK', { hour12: false });
+    }
+    setInterval(updateClock, 1000);
+
+    // ================= 1. 港鐵數據抓取 =================
+    async function fetchMTR() {
+        const mtrList = document.getElementById('mtr-list');
+        const url = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKO&sta=LHP';
+        
+        try {
+            const response = await fetch(url);
+            const json = await response.json();
+            const schedule = json.data['TKO-LHP'].UP;
+            
+            if(!schedule || schedule.length === 0) {
+                mtrList.innerHTML = '<div class="eta-row"><div class="destination">現時未有非繁忙時間服務或非載客列車</div></div>';
+                return;
+            }
+
+            let html = '';
+            schedule.slice(0, 2).forEach(train => {
+                const diffMins = Math.max(0, parseInt(train.ttnt));
+                let dest = train.dest === "NOP" ? "北角" : (train.dest === "TIK" ? "調景嶺" : train.dest);
+                let timeText = diffMins === 0 ? "即將到站" : ${diffMins} 分鐘;
+                
+                html += `
+                    <div class="eta-row">
+                        <div class="route-badge mtr-badge">MTR</div>
+                        <div class="destination">往 ${dest}</div>
+                        <div class="time-left">${timeText}</div>
+                    </div>
+                `;
+            });
+            mtrList.innerHTML = html;
+        } catch (e) {
+            mtrList.innerHTML = '<div style="color:red; padding:10px;">港鐵數據載入失敗</div>';
+        }
+    }
+
+    // ================= 2. 巴士數據抓取 =================
+    const BUS_CONFIG = [
+        { company: 'kmb', route: '98', dir: 'O', stop: 'B86A414064EE18D6', dest: '牛頭角站' },
+        { company: 'ctb', route: '790', dir: 'O', stop: '003253', dest: '尖沙咀東' },
+        { company: 'ctb', route: '795X', dir: 'O', stop: '003253', dest: '蘇屋/旺角' },
+        { company: 'ctb', route: '793', dir: 'O', stop: '003253', dest: '蘇屋/九龍灣' }
+    ];
+
+    async function fetchBus() {
+        const busList = document.getElementById('bus-list');
+        let allEtas = [];
+
+        for (let config of BUS_CONFIG) {
+            try {
+                let url = '';
+                if (config.company === 'kmb') {
+                    url = https://data.etabus.gov.hk/v1/transport/kmb/eta/${config.stop}/${config.route}/${config.dir};
+                } else {
+                    url = https://rt.data.gov.hk/v1/transport/citybus/eta/ctb/${config.stop}/${config.route};
+                }
+
+                const response = await fetch(url);
+                const json = await response.json();
+                
+                if (json.data && json.data.length > 0) {
+                    let filtered = json.data.filter(item => item.eta);
+                    
+                    if (config.company === 'ctb') {
+                        filtered = filtered.filter(item => item.dir === 'O'); 
+                    }
+
+                    if (filtered.length > 0) {
+                        let firstBus = filtered[0];
+                        const diffMs = new Date(firstBus.eta) - new Date();
+                        const diffMins = Math.max(0, Math.floor(diffMs / 1000 / 60));
+                        
+                        allEtas.push({
+                            company: config.company,
+                            route: config.route,
+                            dest: config.dest,
+                            mins: diffMins
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error(無法獲取巴士 ${config.route} 數據, e);
+            }
+        }
+
+        // 按到站時間由近到遠排序
+        allEtas.sort((a, b) => a.mins - b.mins);
+
+        if (allEtas.length === 0) {
+            busList.innerHTML = '<div class="eta-row"><div class="destination">暫無巴士班次</div></div>';
+            return;
+        }
+
+        let html = '';
+        allEtas.forEach(bus => {
+            let badgeClass = bus.company === 'kmb' ? 'kmb-badge' : 'ctb-badge';
+            let companyName = bus.company === 'kmb' ? '九巴' : '城巴';
+            let timeText = bus.mins === 0 ? "到站中" : ${bus.mins} 分鐘;
+            
+            html += `
+                <div class="eta-row">
+                    <div class="route-badge ${badgeClass}">${bus.route}</div>
+                    <div class="destination">${bus.dest} (${companyName})</div>
+                    <div class="time-left">${timeText}</div>
+                </div>
+            `;
+        });
+        busList.innerHTML = html;
+    }
+
+    // ================= 3. 核心控制流程 =================
+    function updateAllData() {
+        document.getElementById('update-status').innerText = '正在更新數據...';
+        Promise.all([fetchMTR(), fetchBus()]).then(() => {
+            const now = new Date();
+            document.getElementById('update-status').innerText = 最後更新: ${now.toLocaleTimeString()};
+        }).catch(() => {
+            document.getElementById('update-status').innerText = 更新出錯，等待下次重試;
+        });
+    }
+
+    // 初始化與定時刷新 (每 30 秒更新一次)
+    updateAllData();
+    setInterval(updateAllData, 30000);
