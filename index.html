@@ -30,9 +30,9 @@
 </div>
 
 <div class="section-title mtr-sec">港鐵將軍澳綫 (康城站)</div>
-<div id="mtr-list">正在獲取港鐵班次...</div>
+<div id="mtr-list">正在直連港鐵 API...</div>
 
-<div class="section-title bus-sec">康城開出巴士 (實時整合)</div>
+<div class="section-title bus-sec">康城開出巴士 (全直連整合)</div>
 <div id="bus-list">正在獲取巴士班次...</div>
 
 <div class="status" id="update-status">正在初始化...</div>
@@ -47,16 +47,12 @@
     }
     setInterval(updateClock, 1000); updateClock();
 
-    // 使用極速、無限制的公用 CORS 代理，徹底解決所有環境的封鎖問題
-    var MTR_PROXY = "https://api.allorigins.win/raw?url=";
-
-    // 2. 港鐵 API 抓取
+    // 2. 港鐵原始 API 直連
     function fetchMTR() {
         var mtrList = document.getElementById('mtr-list');
-        var targetUrl = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKO&sta=LHP';
-        
+        var url = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKO&sta=LHP';
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', MTR_PROXY + encodeURIComponent(targetUrl), true);
+        xhr.open('GET', url, true);
         xhr.onreadystatechange = function () {
             if (xhr.readyState === 4) {
                 if (xhr.status === 200) {
@@ -78,16 +74,14 @@
                         }
                         mtrList.innerHTML = html;
                     } catch (e) { 
-                        mtrList.innerHTML = '<div class="eta-row"><div class="destination" style="color:#aaa;">港鐵數據更新中...</div></div>'; 
+                        mtrList.innerHTML = '<div class="eta-row"><div class="destination" style="color:#aaa;">港鐵數據部署中（請用網站環境查看）</div></div>'; 
                     }
-                } else {
-                    mtrList.innerHTML = '<div class="eta-row"><div class="destination" style="color:#aaa;">港鐵連線中...</div></div>';
                 }
             }
         }; xhr.send();
     }
 
-    // 3. 巴士配置 (全天候 4 條線，全部加上代理防封鎖)
+    // 3. 巴士配置 (全直連 4 條康城主力線)
     var BUS_CONFIG = [
         { company: 'kmb', route: '98', url: 'https://data.etabus.gov.hk/v1/transport/kmb/eta/B86A414064EE18D6/98/O', dest: '牛頭角站' },
         { company: 'ctb', route: '790', url: 'https://rt.data.gov.hk/v1/transport/citybus/eta/ctb/003253/790', dest: '尖沙咀東' },
@@ -103,42 +97,32 @@
         for (var i = 0; i < BUS_CONFIG.length; i++) {
             (function(config) {
                 var xhr = new XMLHttpRequest();
-                xhr.open('GET', MTR_PROXY + encodeURIComponent(config.url), true);
+                xhr.open('GET', config.url, true);
                 xhr.onreadystatechange = function() {
                     if (xhr.readyState === 4) {
                         if (xhr.status === 200) {
                             try {
                                 var json = JSON.parse(xhr.responseText);
                                 var list = json.data || [];
-                                
                                 if (config.company === 'ctb') {
                                     list = list.filter(function(item) { return item.dir === 'O' && item.eta; });
                                 } else {
                                     list = list.filter(function(item) { return item.eta; });
                                 }
-                                
                                 if (list.length > 0) {
                                     var diffMs = new Date(list[0].eta) - new Date();
                                     var diffMins = Math.max(0, Math.floor(diffMs / 1000 / 60));
-                                    allEtas.push({
-                                        company: config.company,
-                                        route: config.route,
-                                        dest: config.dest,
-                                        mins: diffMins
-                                    });
+                                    allEtas.push({ company: config.company, route: config.route, dest: config.dest, mins: diffMins });
                                 }
                             } catch(e) {}
                         }
-                        
                         completedRequests++;
                         if (completedRequests === BUS_CONFIG.length) {
                             allEtas.sort(function(a, b) { return a.mins - b.mins; });
-                            
                             if (allEtas.length === 0) {
-                                busList.innerHTML = '<div class="eta-row"><div class="destination">暫無巴士班次 (請稍後)</div></div>';
+                                busList.innerHTML = '<div class="eta-row"><div class="destination">暫無巴士班次 (班次稀疏中)</div></div>';
                                 return;
                             }
-                            
                             var html = '';
                             for (var j = 0; j < allEtas.length; j++) {
                                 var bus = allEtas[j];
@@ -167,7 +151,7 @@
     }
 
     updateAllData();
-    setInterval(updateAllData, 30000); // 30秒自動刷新
+    setInterval(updateAllData, 30000);
 </script>
 
 </body>
