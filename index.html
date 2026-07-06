@@ -11,7 +11,7 @@
         color: #fff;
         font-family: Arial, sans-serif;
         margin: 0;
-        padding: 13px; /* 稍微縮小內邊距配合字體 */
+        padding: 10px;
         overflow: hidden;
     }
 
@@ -19,30 +19,30 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        border-bottom: 3px solid #333;
-        padding-bottom: 9px;
-        margin-bottom: 13px;
+        border-bottom: 2px solid #333;
+        padding-bottom: 7px;
+        margin-bottom: 10px;
     }
 
     .title {
-        font-size: 23px; /* 26px -> 23px */
+        font-size: 18px;
         font-weight: bold;
         color: #d0bfff;
     }
 
     .clock {
-        font-size: 27px; /* 30px -> 27px */
+        font-size: 22px;
         font-weight: bold;
         color: #00e5ff;
     }
 
     .section-title {
-        font-size: 18px; /* 20px -> 18px */
+        font-size: 14px;
         color: #aaa;
         background: #111;
-        padding: 4px 9px;
-        border-left: 5px solid #fff;
-        margin-top: 13px;
+        padding: 3px 7px;
+        border-left: 4px solid #fff;
+        margin-top: 10px;
     }
 
     .mtr-sec {
@@ -58,22 +58,22 @@
         justify-content: space-between;
         align-items: center;
         border-bottom: 1px solid #222;
-        padding: 9px 4px;
+        padding: 7px 3px;
     }
 
     .route-badge {
-        font-size: 25px; /* 28px -> 25px */
+        font-size: 20px;
         font-weight: bold;
-        width: 85px; /* 配合字體縮小寬度 */
+        width: 70px;
         text-align: center;
-        border-radius: 5px;
-        padding: 2px 0;
+        border-radius: 4px;
+        padding: 1px 0;
     }
 
     .mtr-badge {
         color: #fff;
         background: #7d4199;
-        font-size: 21px; /* 24px -> 21px */
+        font-size: 17px;
     }
 
     .kmb-badge {
@@ -87,29 +87,37 @@
     }
 
     .destination {
-        font-size: 20px; /* 22px -> 20px */
+        font-size: 16px;
         flex-grow: 1;
-        margin-left: 13px;
+        margin-left: 10px;
     }
 
     .time-left {
-        font-size: 25px; /* 28px -> 25px */
+        font-size: 20px;
         font-weight: bold;
         color: #30d158;
         text-align: right;
-        min-width: 126px; /* 140px -> 126px */
+        min-width: 150px; /* 增加寬度以容納 hh:mm */
+    }
+
+    /* 上車時間 (hh:mm) 的小字體樣式 */
+    .eta-clock {
+        font-size: 15px;
+        color: #00e5ff;
+        font-weight: normal;
+        margin-left: 5px;
     }
 
     .no-eta {
         color: #aaa;
-        font-size: 21px; /* 24px -> 21px */
+        font-size: 17px;
     }
 
     .status {
         text-align: center;
         color: #666;
-        font-size: 12px; /* 14px -> 12px */
-        margin-top: 22px;
+        font-size: 10px;
+        margin-top: 18px;
     }
 
     .error {
@@ -219,11 +227,17 @@ function parseEtaTime(value) {
     return date;
 }
 
-// 修改為使用 local 時間運算，防止老舊 Android 時區解析錯誤導致倒數不準
 function getMinutesLeft(etaTime) {
     var targetTime = parseEtaTime(etaTime);
     if (!targetTime) return null;
     return Math.max(0, Math.floor((targetTime - new Date()) / 1000 / 60));
+}
+
+// 新增功能：從原始時間格式中提取 HH:mm 字串
+function formatEtaClock(rawTimeStr) {
+    var t = parseEtaTime(rawTimeStr);
+    if (!t) return "";
+    return " (" + padStartZero(t.getHours()) + ":" + padStartZero(t.getMinutes()) + ")";
 }
 
 function formatMinutes(mins, type) {
@@ -242,7 +256,7 @@ function containsLohasKeyword(text) {
     return false;
 }
 
-// 傳統 XMLHttpRequest 回呼封裝 (完全不用 Promise)
+// 傳統 XMLHttpRequest 回呼封裝
 function ajaxGetJson(url, callback) {
     var xhr = new XMLHttpRequest();
     var cacheBuster = url.indexOf("?") === -1 ? "?" : "&";
@@ -276,7 +290,6 @@ function fetchMTR() {
             return;
         }
 
-        // 手動遍歷物件鍵值，不用 Object.keys()
         var stationKey = "";
         for (var k in json.data) {
             if (json.data.hasOwnProperty(k)) {
@@ -313,11 +326,21 @@ function fetchMTR() {
             var mins = (train.ttnt !== undefined && train.ttnt !== "") ? parseInt(train.ttnt, 10) : getMinutesLeft(train.time);
             if (mins === null || isNaN(mins)) mins = 0;
             var dest = destinationMap[train.dest] || train.dest || "未能確認";
+            
+            // 港鐵的實時到站時間 (若沒給原始字串，就用目前的實際時間加上倒數分鐘算出)
+            var clockStr = "";
+            if (train.time) {
+                clockStr = formatEtaClock(train.time);
+            } else {
+                var futureDate = new Date();
+                futureDate.setMinutes(futureDate.getMinutes() + mins);
+                clockStr = " (" + padStartZero(futureDate.getHours()) + ":" + padStartZero(futureDate.getMinutes()) + ")";
+            }
 
             html += '<div class="eta-row">' +
                     '<div class="route-badge mtr-badge">MTR</div>' +
                     '<div class="destination">往 ' + dest + '</div>' +
-                    '<div class="time-left">' + formatMinutes(mins, "mtr") + '</div>' +
+                    '<div class="time-left">' + formatMinutes(mins, "mtr") + '<span class="eta-clock">' + clockStr + '</span></div>' +
                     '</div>';
         }
         document.getElementById("mtr-list").innerHTML = html;
@@ -333,13 +356,13 @@ function createNoEtaRoute(routeConfig) {
         route: routeConfig.route,
         dest: routeConfig.dest,
         mins: null,
+        rawTime: null,
         order: routeConfig.order,
         stopId: routeConfig.stopId || null
     };
 }
 
 function renderBusList() {
-    // 傳統氣泡排序法排序，避免部分老舊瀏覽器 Array.prototype.sort 的不相容
     for (var i = 0; i < finalBusResults.length - 1; i++) {
         for (var j = 0; j < finalBusResults.length - 1 - i; j++) {
             if (finalBusResults[j].order > finalBusResults[j + 1].order) {
@@ -355,17 +378,18 @@ function renderBusList() {
         var bus = finalBusResults[k];
         var badgeClass = bus.company === "kmb" ? "kmb-badge" : "ctb-badge";
         var timeClass = (bus.mins === null || bus.mins === undefined) ? "time-left no-eta" : "time-left";
+        
+        var clockStr = (bus.mins !== null && bus.rawTime) ? formatEtaClock(bus.rawTime) : "";
 
         html += '<div class="eta-row">' +
                 '<div class="route-badge ' + badgeClass + '">' + bus.route + '</div>' +
                 '<div class="destination">往 ' + bus.dest + '</div>' +
-                '<div class="' + timeClass + '">' + formatMinutes(bus.mins, "bus") + '</div>' +
+                '<div class="' + timeClass + '">' + formatMinutes(bus.mins, "bus") + '<span class="eta-clock">' + clockStr + '</span></div>' +
                 '</div>';
     }
     document.getElementById("bus-list").innerHTML = html;
 }
 
-// 確保統計完整並更新狀態
 function checkBusRequestsComplete() {
     if (completedBusRequests >= BUS_ROUTES.length) {
         renderBusList();
@@ -419,7 +443,6 @@ function findKmbCandidateStops(routeConfig, callback) {
                 });
             }
 
-            // 手動過濾關鍵字
             var candidates = [];
             for (var k = 0; k < mapped.length; k++) {
                 if (containsLohasKeyword(mapped[k].name_tc + " " + mapped[k].name_en)) {
@@ -437,7 +460,6 @@ function fetchKmbEta(routeConfig, stopId, callback) {
     ajaxGetJson(url, function(err, json) {
         var rawList = (json && Array.isArray(json.data)) ? json.data : [];
         
-        // 嚴格過濾去程方向 dir === "O"
         var list = [];
         for (var i = 0; i < rawList.length; i++) {
             if (rawList[i] && rawList[i].eta && rawList[i].dir === routeConfig.dir) {
@@ -450,7 +472,6 @@ function fetchKmbEta(routeConfig, stopId, callback) {
             return;
         }
 
-        // 傳統排序
         for (var m = 0; m < list.length - 1; m++) {
             for (var n = 0; n < list.length - 1 - m; n++) {
                 var tA = parseEtaTime(list[n].eta);
@@ -474,6 +495,7 @@ function fetchKmbEta(routeConfig, stopId, callback) {
             route: routeConfig.route,
             dest: routeConfig.dest,
             mins: mins,
+            rawTime: list[0].eta,
             order: routeConfig.order,
             stopId: stopId
         });
@@ -489,7 +511,6 @@ function fetchOneKmbRoute(routeConfig) {
             return;
         }
         
-        // 遞歸嘗試站點迴圈
         function tryNext(index) {
             if (index >= candidates.length) {
                 finalBusResults.push(createNoEtaRoute(routeConfig));
@@ -520,7 +541,6 @@ function fetchCitybusEta(routeConfig) {
     ajaxGetJson(url, function(err, json) {
         var rawList = (json && Array.isArray(json.data)) ? json.data : [];
         
-        // 嚴格過濾城巴出發去程車次
         var list = [];
         for (var i = 0; i < rawList.length; i++) {
             if (rawList[i] && rawList[i].eta && rawList[i].dir === routeConfig.dir) {
@@ -556,6 +576,7 @@ function fetchCitybusEta(routeConfig) {
                 route: routeConfig.route,
                 dest: routeConfig.dest,
                 mins: mins,
+                rawTime: list[0].eta,
                 order: routeConfig.order,
                 stopId: routeConfig.stopId
             });
@@ -572,14 +593,11 @@ function updateAllData() {
     var status = document.getElementById("update-status");
     if (status) status.innerText = "正在更新數據...";
 
-    // 重設巴士計數器
     finalBusResults = [];
     completedBusRequests = 0;
 
-    // 獲取港鐵
     fetchMTR();
 
-    // 迴圈獲取各巴士線路
     for (var i = 0; i < BUS_ROUTES.length; i++) {
         var rConfig = BUS_ROUTES[i];
         if (rConfig.company === "kmb") {
@@ -590,7 +608,6 @@ function updateAllData() {
     }
 }
 
-// 啟動定時器
 updateAllData();
 setInterval(updateAllData, REFRESH_INTERVAL);
 </script>
