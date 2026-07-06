@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>日出康城實時交通看板</title>
+<title>日出康城實時交通看板 (Android 5.0 終極兼容版)</title>
 
 <style>
     body {
@@ -129,18 +129,20 @@
     <div class="clock" id="current-time">00:00:00</div>
 </div>
 
-<!-- Independent Clock Script -->
+<!-- 獨立時鐘：最安全的舊語法，確保時鐘一定會走 -->
 <script>
+    function padStartZero(val) {
+        var str = String(val);
+        return str.length < 2 ? "0" + str : str;
+    }
+
     function updateClockOnly() {
-        const now = new Date();
+        var now = new Date();
+        var timeText = padStartZero(now.getHours()) + ":" +
+                       padStartZero(now.getMinutes()) + ":" +
+                       padStartZero(now.getSeconds());
 
-        const timeText =
-            String(now.getHours()).padStart(2, "0") + ":" +
-            String(now.getMinutes()).padStart(2, "0") + ":" +
-            String(now.getSeconds()).padStart(2, "0");
-
-        const clockElement = document.getElementById("current-time");
-
+        var clockElement = document.getElementById("current-time");
         if (clockElement) {
             clockElement.innerText = timeText;
         }
@@ -168,299 +170,159 @@
 
 <script>
 /************************************************************
- * 1. Error Handling
+ * 1. 錯誤捕獲（會在網頁底部跳出提示，方便 debug）
  ************************************************************/
-
 window.onerror = function(message, source, lineno, colno, error) {
-    const status = document.getElementById("update-status");
-
+    var status = document.getElementById("update-status");
     if (status) {
-        status.innerText =
-            "JavaScript Error: " + message + " at line " + lineno;
+        status.innerText = "JS Error: " + message + " (Line " + lineno + ")";
     }
-
-    console.error("JavaScript Error:", message, source, lineno, colno, error);
 };
 
 /************************************************************
- * 2. Basic Settings
+ * 2. 基礎配置 (全部 var 宣告)
  ************************************************************/
+var REFRESH_INTERVAL = 30000;
+var MTR_API = "https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKL&sta=LHP";
 
-const REFRESH_INTERVAL = 30000;
-const REQUEST_TIMEOUT = 12000;
-
-const MTR_API =
-    "https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKL&sta=LHP";
-
-/*
-    加入精準方向鎖定 (dir: "O" 代表 Outbound 去程/往市區方向)
-    避免抓取到剛抵達康城落客的班次數據。
-*/
-const BUS_ROUTES = [
-    {
-        company: "kmb",
-        route: "98",
-        serviceType: "1",
-        dir: "O",
-        dest: "將軍澳轉車站 / 牛頭角站",
-        order: 1
-    },
-    {
-        company: "kmb",
-        route: "290X",
-        serviceType: "1",
-        dir: "O",
-        dest: "荃灣西站",
-        order: 2
-    },
-    {
-        company: "kmb",
-        route: "298X",
-        serviceType: "1",
-        dir: "O",
-        dest: "美孚",
-        order: 3
-    },
-    {
-        company: "ctb",
-        route: "790",
-        stopId: "003329",
-        dir: "O",
-        dest: "尖沙咀東",
-        order: 4
-    },
-    {
-        company: "ctb",
-        route: "795",
-        stopId: "003329",
-        dir: "O",
-        dest: "長沙灣",
-        order: 5
-    },
-    {
-        company: "ctb",
-        route: "797",
-        stopId: "003329",
-        dir: "O",
-        dest: "新蒲崗",
-        order: 6
-    }
+var BUS_ROUTES = [
+    { company: "kmb", route: "98", serviceType: "1", dir: "O", dest: "將軍澳轉車站 / 牛頭角站", order: 1 },
+    { company: "kmb", route: "290X", serviceType: "1", dir: "O", dest: "荃灣西站", order: 2 },
+    { company: "kmb", route: "298X", serviceType: "1", dir: "O", dest: "美孚", order: 3 },
+    { company: "ctb", route: "790", stopId: "003329", dir: "O", dest: "尖沙咀東", order: 4 },
+    { company: "ctb", route: "795", stopId: "003329", dir: "O", dest: "長沙灣", order: 5 },
+    { company: "ctb", route: "797", stopId: "003329", dir: "O", dest: "新蒲崗", order: 6 }
 ];
 
-const LOHAS_KEYWORDS = [
-    "康城",
-    "日出",
-    "lohas",
-    "lohas park",
-    "the lohas",
-    "beaumount",
-    "the beaumount",
-    "峻瀅",
-    "首都",
-    "the capitol",
-    "malibu",
-    "wings at sea",
-    "海翩匯",
-    "oscar",
-    "清水灣半島",
-    "mega plus",
-    "wan po",
-    "wan o",
-    "le prestige",
-    "領都",
-    "緻藍天",
-    "shaw studios"
+var LOHAS_KEYWORDS = [
+    "康城", "日出", "lohas", "lohas park", "the lohas", "beaumount", 
+    "the beaumount", "峻瀅", "首都", "the capitol", "malibu", 
+    "wings at sea", "海翩匯", "oscar", "清水灣半島", "mega plus", 
+    "wan po", "wan o", "le prestige", "領都", "緻藍天", "shaw studios"
 ];
 
-let kmbStopListCache = null;
+var kmbStopListCache = null;
 
 /************************************************************
- * 3. Common Tools
+ * 3. 基礎工具與傳統 AJAX 封裝 (取代 Fetch 以相容 Android 5.0)
  ************************************************************/
-
-function showMessage(elementId, message, isError = false) {
-    const element = document.getElementById(elementId);
-
+function showMessage(elementId, message, isError) {
+    var element = document.getElementById(elementId);
     if (!element) return;
-
-    const className = isError ? "destination error" : "destination muted";
-
-    element.innerHTML =
-        `<div class="eta-row"><div class="${className}">${message}</div></div>`;
+    var className = isError ? "destination error" : "destination muted";
+    element.innerHTML = '<div class="eta-row"><div class="' + className + '">' + message + '</div></div>';
 }
 
 function parseEtaTime(value) {
     if (!value) return null;
-
-    const date = new Date(value);
-
-    if (isNaN(date.getTime())) {
-        return null;
-    }
-
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return null;
     return date;
 }
 
 function getMinutesLeft(etaTime) {
-    const targetTime = parseEtaTime(etaTime);
-
+    var targetTime = parseEtaTime(etaTime);
     if (!targetTime) return null;
-
     return Math.max(0, Math.floor((targetTime - new Date()) / 1000 / 60));
 }
 
 function formatMinutes(mins, type) {
-    if (mins === null || mins === undefined) {
-        return "暫無班次";
-    }
-
-    if (mins <= 0) {
-        return type === "bus" ? "到站中" : "即將到站";
-    }
-
+    if (mins === null || mins === undefined) return "暫無班次";
+    if (mins <= 0) return type === "bus" ? "到站中" : "即將到站";
     return mins + " 分鐘";
 }
 
 function containsLohasKeyword(text) {
-    const lower = String(text || "").toLowerCase();
-
-    return LOHAS_KEYWORDS.some(keyword =>
-        lower.includes(keyword.toLowerCase())
-    );
+    var lower = String(text || "").toLowerCase();
+    for (var i = 0; i < LOHAS_KEYWORDS.length; i++) {
+        if (lower.indexOf(LOHAS_KEYWORDS[i].toLowerCase()) !== -1) {
+            return true;
+        }
+    }
+    return false;
 }
 
-function getStopId(row) {
-    return row.stop || row.stop_id || row.stopId || row.STOP_ID || "";
-}
-
-function getSeq(row) {
-    return Number(row.seq || row.stop_seq || row.sequence || row.stopSeq || 999);
-}
-
-function removeDuplicateStops(stops) {
-    const seen = {};
-
-    return stops.filter(item => {
-        if (!item || !item.stop) return false;
-
-        if (seen[item.stop]) return false;
-
-        seen[item.stop] = true;
-        return true;
+// 使用 XMLHttpRequest 取代 fetch 避免 Android 5.0 核心不支援
+function getJsonViaAjax(url) {
+    return new Promise(function(resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", url + (url.indexOf("?") === -1 ? "?" : "&") + "_t=" + new Date().getTime(), true);
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        var data = JSON.parse(xhr.responseText);
+                        resolve(data);
+                    } catch (e) {
+                        reject(new Error("JSON Parse Error"));
+                    }
+                } else {
+                    reject(new Error("HTTP Error " + xhr.status));
+                }
+            }
+        };
+        xhr.send();
     });
 }
 
-async function fetchJson(url, label) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+/************************************************************
+ * 4. 港鐵數據處理
+ ************************************************************/
+function fetchMTR() {
+    getJsonViaAjax(MTR_API)
+        .then(function(json) {
+            if (!json || !json.data) {
+                showMessage("mtr-list", "港鐵資料格式異常", true);
+                return;
+            }
+            var keys = [];
+            for (var k in json.data) {
+                if (json.data.hasOwnProperty(k)) keys.push(k);
+            }
+            if (keys.length === 0) {
+                showMessage("mtr-list", "港鐵暫無資料", true);
+                return;
+            }
+            var stationData = json.data[keys[0]];
+            var schedule = [];
 
-    try {
-        console.log(`[${label}] Request:`, url);
+            if (stationData.UP && stationData.UP.length > 0) {
+                schedule = stationData.UP;
+            } else if (stationData.DOWN && stationData.DOWN.length > 0) {
+                schedule = stationData.DOWN;
+            }
 
-        const response = await fetch(url, {
-            method: "GET",
-            cache: "no-store",
-            signal: controller.signal
+            if (schedule.length === 0) {
+                showMessage("mtr-list", "非行車時間 / 暫無港鐵班次");
+                return;
+            }
+
+            var destinationMap = { "NOP": "北角", "TIK": "調景嶺", "POA": "寶琳", "LHP": "康城" };
+            var html = "";
+            var displayCount = Math.min(schedule.length, 3);
+
+            for (var i = 0; i < displayCount; i++) {
+                var train = schedule[i];
+                var mins = (train.ttnt !== undefined && train.ttnt !== "") ? parseInt(train.ttnt, 10) : getMinutesLeft(train.time);
+                if (mins === null || isNaN(mins)) mins = 0;
+                var dest = destinationMap[train.dest] || train.dest || "未能確認";
+
+                html += '<div class="eta-row">' +
+                        '<div class="route-badge mtr-badge">MTR</div>' +
+                        '<div class="destination">往 ' + dest + '</div>' +
+                        '<div class="time-left">' + formatMinutes(mins, "mtr") + '</div>' +
+                        '</div>';
+            }
+            document.getElementById("mtr-list").innerHTML = html;
+        })
+        .catch(function() {
+            showMessage("mtr-list", "港鐵資料更新失敗", true);
         });
-
-        clearTimeout(timer);
-
-        console.log(`[${label}] Status:`, response.status);
-
-        if (!response.ok) {
-            throw new Error(`${label} HTTP Error: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        console.log(`[${label}] Response:`, data);
-
-        return data;
-
-    } catch (error) {
-        clearTimeout(timer);
-        console.error(`[${label}] Failed:`, error);
-        throw error;
-    }
 }
 
 /************************************************************
- * 4. MTR
+ * 5. 巴士數據處理與渲染
  ************************************************************/
-
-async function fetchMTR() {
-    try {
-        const json = await fetchJson(MTR_API, "MTR");
-
-        if (!json || !json.data) {
-            showMessage("mtr-list", "港鐵資料格式異常", true);
-            return;
-        }
-
-        const stationKey = Object.keys(json.data)[0];
-
-        if (!stationKey) {
-            showMessage("mtr-list", "港鐵暫無資料", true);
-            return;
-        }
-
-        const stationData = json.data[stationKey];
-
-        let schedule = [];
-
-        if (Array.isArray(stationData.UP) && stationData.UP.length > 0) {
-            schedule = stationData.UP;
-        } else if (Array.isArray(stationData.DOWN) && stationData.DOWN.length > 0) {
-            schedule = stationData.DOWN;
-        }
-
-        if (!schedule.length) {
-            showMessage("mtr-list", "非行車時間 / 暫無港鐵班次");
-            return;
-        }
-
-        const destinationMap = {
-            NOP: "北角",
-            TIK: "調景嶺",
-            POA: "寶琳",
-            LHP: "康城"
-        };
-
-        const html = schedule.slice(0, 3).map(train => {
-            let mins;
-
-            if (train.ttnt !== undefined && train.ttnt !== "") {
-                mins = parseInt(train.ttnt, 10);
-            } else {
-                mins = getMinutesLeft(train.time);
-            }
-
-            if (mins === null || isNaN(mins)) {
-                mins = 0;
-            }
-
-            const dest = destinationMap[train.dest] || train.dest || "未能確認";
-
-            return `
-                <div class="eta-row">
-                    <div class="route-badge mtr-badge">MTR</div>
-                    <div class="destination">往 ${dest}</div>
-                    <div class="time-left">${formatMinutes(mins, "mtr")}</div>
-                </div>
-            `;
-        }).join("");
-
-        document.getElementById("mtr-list").innerHTML = html;
-
-    } catch (error) {
-        showMessage("mtr-list", "港鐵資料更新失敗", true);
-    }
-}
-
-/************************************************************
- * 5. Bus Display
- ************************************************************/
-
 function createNoEtaRoute(routeConfig) {
     return {
         company: routeConfig.company,
@@ -473,300 +335,223 @@ function createNoEtaRoute(routeConfig) {
 }
 
 function renderBusList(busList) {
-    const orderedList = [...busList].sort((a, b) => a.order - b.order);
+    busList.sort(function(a, b) { return a.order - b.order; });
 
-    const html = orderedList.map(bus => {
-        const badgeClass = bus.company === "kmb" ? "kmb-badge" : "ctb-badge";
+    var html = "";
+    for (var i = 0; i < busList.length; i++) {
+        var bus = busList[i];
+        var badgeClass = bus.company === "kmb" ? "kmb-badge" : "ctb-badge";
+        var timeClass = (bus.mins === null || bus.mins === undefined) ? "time-left no-eta" : "time-left";
 
-        const timeClass =
-            bus.mins === null || bus.mins === undefined
-                ? "time-left no-eta"
-                : "time-left";
-
-        return `
-            <div class="eta-row">
-                <div class="route-badge ${badgeClass}">${bus.route}</div>
-                <div class="destination">往 ${bus.dest}</div>
-                <div class="${timeClass}">${formatMinutes(bus.mins, "bus")}</div>
-            </div>
-        `;
-    }).join("");
-
+        html += '<div class="eta-row">' +
+                '<div class="route-badge ' + badgeClass + '">' + bus.route + '</div>' +
+                '<div class="destination">往 ' + bus.dest + '</div>' +
+                '<div class="' + timeClass + '">' + formatMinutes(bus.mins, "bus") + '</div>' +
+                '</div>';
+    }
     document.getElementById("bus-list").innerHTML = html;
 }
 
 /************************************************************
- * 6. KMB Auto Stop Discovery
+ * 6. 九巴自動配對站點（精準鎖定方向過濾）
  ************************************************************/
-
-async function getKmbStopList() {
-    if (kmbStopListCache) return kmbStopListCache;
-
-    const json = await fetchJson(
-        "https://data.etabus.gov.hk/v1/transport/kmb/stop",
-        "KMB STOP LIST"
-    );
-
-    kmbStopListCache = Array.isArray(json.data) ? json.data : [];
-
-    return kmbStopListCache;
-}
-
-function buildKmbStopMap(stopList) {
-    const map = {};
-
-    stopList.forEach(stop => {
-        const stopId = getStopId(stop);
-
-        if (stopId) {
-            map[stopId] = stop;
-        }
-    });
-
-    return map;
-}
-
-async function getKmbRouteStops(route, direction, serviceType) {
-    const url =
-        `https://data.etabus.gov.hk/v1/transport/kmb/route-stop/${route}/${direction}/${serviceType}`;
-
-    try {
-        const json = await fetchJson(url, `KMB ${route} ${direction} ROUTE-STOPS`);
-
-        return Array.isArray(json.data) ? json.data : [];
-
-    } catch (error) {
-        console.warn(`KMB ${route} ${direction} route-stop failed`, error);
-        return [];
-    }
-}
-
-async function findKmbCandidateStops(routeConfig) {
-    const stopList = await getKmbStopList();
-    const stopMap = buildKmbStopMap(stopList);
-
-    let rows = [];
-    
-    // 精準優化：根據設定的 dir ("O"=outbound, "I"=inbound) 只比對正確路段上的站點
-    const targetDirection = routeConfig.dir === "O" ? "outbound" : "inbound";
-
-    const routeStops = await getKmbRouteStops(
-        routeConfig.route,
-        targetDirection,
-        routeConfig.serviceType
-    );
-
-    routeStops.forEach(row => {
-        rows.push({
-            ...row,
-            directionText: targetDirection
+function getKmbStopList() {
+    if (kmbStopListCache) return Promise.resolve(kmbStopListCache);
+    return getJsonViaAjax("https://data.etabus.gov.hk/v1/transport/kmb/stop")
+        .then(function(json) {
+            kmbStopListCache = (json && Array.isArray(json.data)) ? json.data : [];
+            return kmbStopListCache;
         });
-    });
-
-    let mapped = rows.map(row => {
-        const stopId = getStopId(row);
-        const stopInfo = stopMap[stopId] || {};
-
-        return {
-            stop: stopId,
-            seq: getSeq(row),
-            direction: row.dir || row.direction || row.directionText || "",
-            name_tc: stopInfo.name_tc || "",
-            name_en: stopInfo.name_en || ""
-        };
-    });
-
-    mapped = removeDuplicateStops(mapped);
-
-    let candidates = mapped.filter(item =>
-        containsLohasKeyword(`${item.name_tc} ${item.name_en}`)
-    );
-
-    if (!candidates.length) {
-        candidates = mapped.sort((a, b) => a.seq - b.seq);
-    }
-
-    console.log(`KMB ${routeConfig.route} candidate stops:`, candidates);
-
-    return candidates;
 }
 
-async function fetchKmbEta(routeConfig, stopId) {
-    const url =
-        `https://data.etabus.gov.hk/v1/transport/kmb/eta/${stopId}/${routeConfig.route}/${routeConfig.serviceType}`;
+function findKmbCandidateStops(routeConfig) {
+    var targetDirection = routeConfig.dir === "O" ? "outbound" : "inbound";
+    var url = "https://data.etabus.gov.hk/v1/transport/kmb/route-stop/" + routeConfig.route + "/" + targetDirection + "/" + routeConfig.serviceType;
 
-    try {
-        const json = await fetchJson(url, `KMB ${routeConfig.route} ETA ${stopId}`);
+    return Promise.all([getKmbStopList(), getJsonViaAjax(url)])
+        .then(function(results) {
+            var stopList = results[0];
+            var routeStops = (results[1] && Array.isArray(results[1].data)) ? results[1].data : [];
 
-        let list = Array.isArray(json.data) ? json.data : [];
-
-        // 精準優化：嚴格篩選只符合指定方向 (dir) 的動態班次數據
-        list = list.filter(item => item && item.eta && item.dir === routeConfig.dir);
-
-        if (!list.length) {
-            return null;
-        }
-
-        list.sort((a, b) => {
-            const timeA = parseEtaTime(a.eta);
-            const timeB = parseEtaTime(b.eta);
-
-            if (!timeA || !timeB) return 0;
-
-            return timeA - timeB;
-        });
-
-        const mins = getMinutesLeft(list[0].eta);
-
-        if (mins === null) {
-            return null;
-        }
-
-        return {
-            company: "kmb",
-            route: routeConfig.route,
-            dest: routeConfig.dest,
-            mins,
-            order: routeConfig.order,
-            stopId
-        };
-
-    } catch (error) {
-        console.warn(`KMB ${routeConfig.route} ETA failed for stop ${stopId}`, error);
-        return null;
-    }
-}
-
-async function fetchOneKmbRoute(routeConfig) {
-    try {
-        const candidates = await findKmbCandidateStops(routeConfig);
-
-        for (const stop of candidates) {
-            const eta = await fetchKmbEta(routeConfig, stop.stop);
-
-            if (eta) {
-                console.log(`Selected KMB ${routeConfig.route}:`, stop);
-                return eta;
+            var stopMap = {};
+            for (var i = 0; i < stopList.length; i++) {
+                var s = stopList[i];
+                if (s.stop) stopMap[s.stop] = s;
             }
-        }
 
-        return createNoEtaRoute(routeConfig);
+            var mapped = [];
+            var seenStops = {};
+            for (var j = 0; j < routeStops.length; j++) {
+                var rRow = routeStops[j];
+                var sId = rRow.stop || rRow.stop_id;
+                if (!sId || seenStops[sId]) continue;
+                seenStops[sId] = true;
 
-    } catch (error) {
-        console.error(`KMB ${routeConfig.route} failed`, error);
-        return createNoEtaRoute(routeConfig);
-    }
-}
+                var stopInfo = stopMap[sId] || {};
+                mapped.push({
+                    stop: sId,
+                    name_tc: stopInfo.name_tc || "",
+                    name_en: stopInfo.name_en || ""
+                });
+            }
 
-/************************************************************
- * 7. Citybus Fixed Stop ID
- ************************************************************/
+            var candidates = [];
+            for (var k = 0; k < mapped.length; k++) {
+                if (containsLohasKeyword(mapped[k].name_tc + " " + mapped[k].name_en)) {
+                    candidates.push(mapped[k]);
+                }
+            }
 
-async function fetchCitybusEta(routeConfig) {
-    const stopId = routeConfig.stopId;
-
-    const url =
-        `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${stopId}/${routeConfig.route}`;
-
-    try {
-        const json = await fetchJson(url, `CTB ${routeConfig.route} ETA ${stopId}`);
-
-        let list = Array.isArray(json.data) ? json.data : [];
-
-        // 精準優化：城巴同樣嚴格過濾車次方向 (O=去程)
-        list = list.filter(item => item && item.eta && item.dir === routeConfig.dir);
-
-        if (!list.length) {
-            return createNoEtaRoute(routeConfig);
-        }
-
-        list.sort((a, b) => {
-            const timeA = parseEtaTime(a.eta);
-            const timeB = parseEtaTime(b.eta);
-
-            if (!timeA || !timeB) return 0;
-
-            return timeA - timeB;
-        });
-
-        const mins = getMinutesLeft(list[0].eta);
-
-        if (mins === null) {
-            return createNoEtaRoute(routeConfig);
-        }
-
-        return {
-            company: "ctb",
-            route: routeConfig.route,
-            dest: routeConfig.dest,
-            mins,
-            order: routeConfig.order,
-            stopId
-        };
-
-    } catch (error) {
-        console.warn(`CTB ${routeConfig.route} failed`, error);
-        return createNoEtaRoute(routeConfig);
-    }
-}
-
-/************************************************************
- * 8. Bus Integration
- ************************************************************/
-
-async function fetchBus() {
-    document.getElementById("bus-list").innerHTML =
-        `<div class="eta-row"><div class="destination muted">正在獲取巴士班次...</div></div>`;
-
-    const routePromises = BUS_ROUTES.map(routeConfig => {
-        if (routeConfig.company === "kmb") {
-            return fetchOneKmbRoute(routeConfig);
-        }
-
-        if (routeConfig.company === "ctb") {
-            return fetchCitybusEta(routeConfig);
-        }
-
-        return Promise.resolve(createNoEtaRoute(routeConfig));
-    });
-
-    const results = await Promise.allSettled(routePromises);
-
-    const busResults = results.map((result, index) => {
-        if (result.status === "fulfilled" && result.value) {
-            return result.value;
-        }
-
-        return createNoEtaRoute(BUS_ROUTES[index]);
-    });
-
-    renderBusList(busResults);
-
-    console.log("Final bus results:", busResults);
-}
-
-/************************************************************
- * 9. Update All
- ************************************************************/
-
-async function updateAllData() {
-    const status = document.getElementById("update-status");
-
-    status.innerText = "正在更新數據...";
-
-    await Promise.allSettled([
-        fetchMTR(),
-        fetchBus()
-    ]);
-
-    const now = new Date();
-
-    status.innerText =
-        "最後更新: " + now.toLocaleTimeString("zh-HK", {
-            hour12: false
+            return candidates.length > 0 ? candidates : mapped;
+        })
+        .catch(function() {
+            return [];
         });
 }
 
+function fetchKmbEta(routeConfig, stopId) {
+    var url = "https://data.etabus.gov.hk/v1/transport/kmb/eta/" + stopId + "/" + routeConfig.route + "/" + routeConfig.serviceType;
+    return getJsonViaAjax(url)
+        .then(function(json) {
+            var rawList = (json && Array.isArray(json.data)) ? json.data : [];
+            
+            // 嚴格篩選符合方向的車次（過濾落客站）
+            var list = [];
+            for (var i = 0; i < rawList.length; i++) {
+                var item = rawList[i];
+                if (item && item.eta && item.dir === routeConfig.dir) {
+                    list.push(item);
+                }
+            }
+
+            if (list.length === 0) return null;
+
+            list.sort(function(a, b) {
+                var tA = parseEtaTime(a.eta);
+                var tB = parseEtaTime(b.eta);
+                return (tA && tB) ? tA - tB : 0;
+            });
+
+            var mins = getMinutesLeft(list[0].eta);
+            if (mins === null) return null;
+
+            return {
+                company: "kmb",
+                route: routeConfig.route,
+                dest: routeConfig.dest,
+                mins: mins,
+                order: routeConfig.order,
+                stopId: stopId
+            };
+        })
+        .catch(function() {
+            return null;
+        });
+}
+
+function fetchOneKmbRoute(routeConfig) {
+    return findKmbCandidateStops(routeConfig)
+        .then(function(candidates) {
+            if (candidates.length === 0) return createNoEtaRoute(routeConfig);
+            
+            // 傳統遞歸避免 for-of 造成老舊設備崩潰
+            function tryNext(index) {
+                if (index >= candidates.length) return createNoEtaRoute(routeConfig);
+                return fetchKmbEta(routeConfig, candidates[index].stop)
+                    .then(function(etaResult) {
+                        if (etaResult) return etaResult;
+                        return tryNext(index + 1);
+                    });
+            }
+            return tryNext(0);
+        });
+}
+
+/************************************************************
+ * 7. 城巴固定站點（精準方向過濾）
+ ************************************************************/
+function fetchCitybusEta(routeConfig) {
+    var url = "https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/" + routeConfig.stopId + "/" + routeConfig.route;
+    return getJsonViaAjax(url)
+        .then(function(json) {
+            var rawList = (json && Array.isArray(json.data)) ? json.data : [];
+            
+            // 嚴格篩選城巴出發方向的數據
+            var list = [];
+            for (var i = 0; i < rawList.length; i++) {
+                var item = rawList[i];
+                if (item && item.eta && item.dir === routeConfig.dir) {
+                    list.push(item);
+                }
+            }
+
+            if (list.length === 0) return createNoEtaRoute(routeConfig);
+
+            list.sort(function(a, b) {
+                var tA = parseEtaTime(a.eta);
+                var tB = parseEtaTime(b.eta);
+                return (tA && tB) ? tA - tB : 0;
+            });
+
+            var mins = getMinutesLeft(list[0].eta);
+            if (mins === null) return createNoEtaRoute(routeConfig);
+
+            return {
+                company: "ctb",
+                route: routeConfig.route,
+                dest: routeConfig.dest,
+                mins: mins,
+                order: routeConfig.order,
+                stopId: routeConfig.stopId
+            };
+        })
+        .catch(function() {
+            return createNoEtaRoute(routeConfig);
+        });
+}
+
+/************************************************************
+ * 8. 巴士整合調度
+ ************************************************************/
+function fetchBus() {
+    var promises = [];
+    for (var i = 0; i < BUS_ROUTES.length; i++) {
+        var rConfig = BUS_ROUTES[i];
+        if (rConfig.company === "kmb") {
+            promises.push(fetchOneKmbRoute(rConfig));
+        } else if (rConfig.company === "ctb") {
+            promises.push(fetchCitybusEta(rConfig));
+        } else {
+            promises.push(Promise.resolve(createNoEtaRoute(rConfig)));
+        }
+    }
+
+    return Promise.all(promises)
+        .then(function(results) {
+            renderBusList(results);
+        })
+        .catch(function(err) {
+            console.error(err);
+        });
+}
+
+/************************************************************
+ * 9. 全局週期更新
+ ************************************************************/
+function updateAllData() {
+    var status = document.getElementById("update-status");
+    if (status) status.innerText = "正在更新數據...";
+
+    fetchMTR();
+    fetchBus();
+
+    var now = new Date();
+    if (status) {
+        status.innerText = "最後更新: " + padStartZero(now.getHours()) + ":" + padStartZero(now.getMinutes()) + ":" + padStartZero(now.getSeconds());
+    }
+}
+
+// 啟動與定時器
 updateAllData();
 setInterval(updateAllData, REFRESH_INTERVAL);
 </script>
