@@ -97,10 +97,9 @@
         font-weight: bold;
         color: #30d158;
         text-align: right;
-        min-width: 150px; /* 增加寬度以容納 hh:mm */
+        min-width: 150px;
     }
 
-    /* 上車時間 (hh:mm) 的小字體樣式 */
     .eta-clock {
         font-size: 15px;
         color: #00e5ff;
@@ -137,7 +136,6 @@
     <div class="clock" id="current-time">00:00:00</div>
 </div>
 
-<!-- 【最安全時鐘】不依賴任何外部函數，確保網頁載入時鐘一定會動 -->
 <script>
     function padStartZero(val) {
         var str = String(val);
@@ -177,9 +175,9 @@
 <div class="status" id="update-status">正在初始化...</div>
 
 <script>
-/************************************************************
- * 1. 基礎防錯配置 (全面回退至最原始 ES3/5 語法)
- ************************************************************/
+/********************
+ * 1. 基礎防錯配置
+ ********************/
 window.onerror = function(message, source, lineno) {
     var status = document.getElementById("update-status");
     if (status) {
@@ -190,19 +188,35 @@ window.onerror = function(message, source, lineno) {
 var REFRESH_INTERVAL = 30000;
 var MTR_API = "https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TKL&sta=LHP";
 
+/*
+ * 只有 298X 加入 preferredStopKeywords
+ * 其他路線維持原本自動配對邏輯
+ */
 var BUS_ROUTES = [
     { company: "kmb", route: "98", serviceType: "1", dir: "O", dest: "將軍澳轉車站 / 牛頭角站", order: 1 },
     { company: "kmb", route: "290X", serviceType: "1", dir: "O", dest: "荃灣西站", order: 2 },
-    { company: "kmb", route: "298X", serviceType: "1", dir: "O", dest: "美孚", order: 3 },
+    {
+        company: "kmb",
+        route: "298X",
+        serviceType: "1",
+        dir: "O",
+        dest: "美孚",
+        order: 3,
+        preferredStopKeywords: [
+            "康城站",
+            "LOHAS Park Station",
+            "LOHAS PARK STATION"
+        ]
+    },
     { company: "ctb", route: "790", stopId: "003329", dir: "O", dest: "尖沙咀東", order: 4 },
     { company: "ctb", route: "795", stopId: "003329", dir: "O", dest: "長沙灣", order: 5 },
     { company: "ctb", route: "797", stopId: "003329", dir: "O", dest: "新蒲崗", order: 6 }
 ];
 
 var LOHAS_KEYWORDS = [
-    "康城", "日出", "lohas", "lohas park", "the lohas", "beaumount", 
-    "the beaumount", "峻瀅", "首都", "the capitol", "malibu", 
-    "wings at sea", "海翩匯", "oscar", "清水灣半島", "mega plus", 
+    "康城", "日出", "lohas", "lohas park", "the lohas", "beaumount",
+    "the beaumount", "峻瀅", "首都", "the capitol", "malibu",
+    "wings at sea", "海翩匯", "oscar", "清水灣半島", "mega plus",
     "wan po", "wan o", "le prestige", "領都", "緻藍天", "shaw studios"
 ];
 
@@ -210,59 +224,78 @@ var kmbStopListCache = null;
 var finalBusResults = [];
 var completedBusRequests = 0;
 
-/************************************************************
+/********************
  * 2. 基礎工具函數
- ************************************************************/
+ ********************/
 function showMessage(elementId, message, isError) {
     var element = document.getElementById(elementId);
     if (!element) return;
+
     var className = isError ? "destination error" : "destination muted";
     element.innerHTML = '<div class="eta-row"><div class="' + className + '">' + message + '</div></div>';
 }
 
 function parseEtaTime(value) {
     if (!value) return null;
+
     var date = new Date(value);
     if (isNaN(date.getTime())) return null;
+
     return date;
 }
 
 function getMinutesLeft(etaTime) {
     var targetTime = parseEtaTime(etaTime);
     if (!targetTime) return null;
+
     return Math.max(0, Math.floor((targetTime - new Date()) / 1000 / 60));
 }
 
-// 新增功能：從原始時間格式中提取 HH:mm 字串
 function formatEtaClock(rawTimeStr) {
     var t = parseEtaTime(rawTimeStr);
     if (!t) return "";
+
     return " (" + padStartZero(t.getHours()) + ":" + padStartZero(t.getMinutes()) + ")";
 }
 
 function formatMinutes(mins, type) {
     if (mins === null || mins === undefined) return "暫無班次";
     if (mins <= 0) return type === "bus" ? "到站中" : "即將到站";
+
     return mins + " 分鐘";
 }
 
 function containsLohasKeyword(text) {
     var lower = String(text || "").toLowerCase();
+
     for (var i = 0; i < LOHAS_KEYWORDS.length; i++) {
         if (lower.indexOf(LOHAS_KEYWORDS[i].toLowerCase()) !== -1) {
             return true;
         }
     }
+
     return false;
 }
 
-// 傳統 XMLHttpRequest 回呼封裝
+function containsPreferredStopKeyword(text, keywords) {
+    var lower = String(text || "").toLowerCase();
+
+    for (var i = 0; i < keywords.length; i++) {
+        if (lower.indexOf(String(keywords[i]).toLowerCase()) !== -1) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function ajaxGetJson(url, callback) {
     var xhr = new XMLHttpRequest();
     var cacheBuster = url.indexOf("?") === -1 ? "?" : "&";
     cacheBuster += "_t=" + new Date().getTime();
-    
+
     xhr.open("GET", url + cacheBuster, true);
+
     xhr.onreadystatechange = function() {
         if (xhr.readyState === 4) {
             if (xhr.status >= 200 && xhr.status < 300) {
@@ -277,12 +310,13 @@ function ajaxGetJson(url, callback) {
             }
         }
     };
+
     xhr.send();
 }
 
-/************************************************************
- * 3. 港鐵數據處理 (純 Callback)
- ************************************************************/
+/********************
+ * 3. 港鐵數據處理
+ ********************/
 function fetchMTR() {
     ajaxGetJson(MTR_API, function(err, json) {
         if (err || !json || !json.data) {
@@ -291,6 +325,7 @@ function fetchMTR() {
         }
 
         var stationKey = "";
+
         for (var k in json.data) {
             if (json.data.hasOwnProperty(k)) {
                 stationKey = k;
@@ -317,18 +352,29 @@ function fetchMTR() {
             return;
         }
 
-        var destinationMap = { "NOP": "北角", "TIK": "調景嶺", "POA": "寶琳", "LHP": "康城" };
+        var destinationMap = {
+            "NOP": "北角",
+            "TIK": "調景嶺",
+            "POA": "寶琳",
+            "LHP": "康城"
+        };
+
         var html = "";
         var displayCount = schedule.length < 3 ? schedule.length : 3;
 
         for (var i = 0; i < displayCount; i++) {
             var train = schedule[i];
-            var mins = (train.ttnt !== undefined && train.ttnt !== "") ? parseInt(train.ttnt, 10) : getMinutesLeft(train.time);
+
+            var mins = train.ttnt !== undefined && train.ttnt !== ""
+                ? parseInt(train.ttnt, 10)
+                : getMinutesLeft(train.time);
+
             if (mins === null || isNaN(mins)) mins = 0;
+
             var dest = destinationMap[train.dest] || train.dest || "未能確認";
-            
-            // 港鐵的實時到站時間 (若沒給原始字串，就用目前的實際時間加上倒數分鐘算出)
+
             var clockStr = "";
+
             if (train.time) {
                 clockStr = formatEtaClock(train.time);
             } else {
@@ -340,16 +386,18 @@ function fetchMTR() {
             html += '<div class="eta-row">' +
                     '<div class="route-badge mtr-badge">MTR</div>' +
                     '<div class="destination">往 ' + dest + '</div>' +
-                    '<div class="time-left">' + formatMinutes(mins, "mtr") + '<span class="eta-clock">' + clockStr + '</span></div>' +
+                    '<div class="time-left">' + formatMinutes(mins, "mtr") +
+                    '<span class="eta-clock">' + clockStr + '</span></div>' +
                     '</div>';
         }
+
         document.getElementById("mtr-list").innerHTML = html;
     });
 }
 
-/************************************************************
- * 4. 巴士數據處理與傳統排序渲染
- ************************************************************/
+/********************
+ * 4. 巴士渲染
+ ********************/
 function createNoEtaRoute(routeConfig) {
     return {
         company: routeConfig.company,
@@ -374,68 +422,86 @@ function renderBusList() {
     }
 
     var html = "";
+
     for (var k = 0; k < finalBusResults.length; k++) {
         var bus = finalBusResults[k];
         var badgeClass = bus.company === "kmb" ? "kmb-badge" : "ctb-badge";
-        var timeClass = (bus.mins === null || bus.mins === undefined) ? "time-left no-eta" : "time-left";
-        
-        var clockStr = (bus.mins !== null && bus.rawTime) ? formatEtaClock(bus.rawTime) : "";
+        var timeClass = bus.mins === null || bus.mins === undefined ? "time-left no-eta" : "time-left";
+        var clockStr = bus.mins !== null && bus.rawTime ? formatEtaClock(bus.rawTime) : "";
 
         html += '<div class="eta-row">' +
                 '<div class="route-badge ' + badgeClass + '">' + bus.route + '</div>' +
                 '<div class="destination">往 ' + bus.dest + '</div>' +
-                '<div class="' + timeClass + '">' + formatMinutes(bus.mins, "bus") + '<span class="eta-clock">' + clockStr + '</span></div>' +
+                '<div class="' + timeClass + '">' + formatMinutes(bus.mins, "bus") +
+                '<span class="eta-clock">' + clockStr + '</span></div>' +
                 '</div>';
     }
+
     document.getElementById("bus-list").innerHTML = html;
 }
 
 function checkBusRequestsComplete() {
     if (completedBusRequests >= BUS_ROUTES.length) {
         renderBusList();
+
         var status = document.getElementById("update-status");
         var now = new Date();
+
         if (status) {
-            status.innerText = "最後更新: " + padStartZero(now.getHours()) + ":" + padStartZero(now.getMinutes()) + ":" + padStartZero(now.getSeconds());
+            status.innerText = "最後更新: " +
+                padStartZero(now.getHours()) + ":" +
+                padStartZero(now.getMinutes()) + ":" +
+                padStartZero(now.getSeconds());
         }
     }
 }
 
-/************************************************************
- * 5. 九巴自動配對站點（純手動迴圈，精準過濾落客站）
- ************************************************************/
+/********************
+ * 5. 九巴站點及 ETA
+ ********************/
 function getKmbStopList(callback) {
     if (kmbStopListCache) {
         callback(kmbStopListCache);
         return;
     }
+
     ajaxGetJson("https://data.etabus.gov.hk/v1/transport/kmb/stop", function(err, json) {
-        kmbStopListCache = (json && Array.isArray(json.data)) ? json.data : [];
+        kmbStopListCache = json && Array.isArray(json.data) ? json.data : [];
         callback(kmbStopListCache);
     });
 }
 
 function findKmbCandidateStops(routeConfig, callback) {
     var targetDirection = routeConfig.dir === "O" ? "outbound" : "inbound";
-    var url = "https://data.etabus.gov.hk/v1/transport/kmb/route-stop/" + routeConfig.route + "/" + targetDirection + "/" + routeConfig.serviceType;
+    var url = "https://data.etabus.gov.hk/v1/transport/kmb/route-stop/" +
+              routeConfig.route + "/" +
+              targetDirection + "/" +
+              routeConfig.serviceType;
 
     getKmbStopList(function(stopList) {
         ajaxGetJson(url, function(err, rJson) {
-            var routeStops = (rJson && Array.isArray(rJson.data)) ? rJson.data : [];
+            var routeStops = rJson && Array.isArray(rJson.data) ? rJson.data : [];
 
             var stopMap = {};
+
             for (var i = 0; i < stopList.length; i++) {
-                if (stopList[i].stop) stopMap[stopList[i].stop] = stopList[i];
+                if (stopList[i].stop) {
+                    stopMap[stopList[i].stop] = stopList[i];
+                }
             }
 
             var mapped = [];
             var seenStops = {};
+
             for (var j = 0; j < routeStops.length; j++) {
                 var sId = routeStops[j].stop || routeStops[j].stop_id;
+
                 if (!sId || seenStops[sId]) continue;
+
                 seenStops[sId] = true;
 
                 var stopInfo = stopMap[sId] || {};
+
                 mapped.push({
                     stop: sId,
                     name_tc: stopInfo.name_tc || "",
@@ -444,6 +510,36 @@ function findKmbCandidateStops(routeConfig, callback) {
             }
 
             var candidates = [];
+
+            /*
+             * 298X 專用修正：
+             * 只優先選「康城站 / LOHAS Park Station」
+             * 避免誤取 298X 路線中其他較前的日出康城相關站點
+             */
+            if (routeConfig.route === "298X" && routeConfig.preferredStopKeywords) {
+                for (var p = 0; p < mapped.length; p++) {
+                    var preferredName =
+                        (mapped[p].name_tc || "") + " " +
+                        (mapped[p].name_en || "");
+
+                    if (containsPreferredStopKeyword(preferredName, routeConfig.preferredStopKeywords)) {
+                        candidates.push(mapped[p]);
+                    }
+                }
+
+                /*
+                 * 如果 API 站名有變而找不到「康城站」，
+                 * 才回落到原本 LOHAS 關鍵字邏輯，避免完全無班次。
+                 */
+                if (candidates.length > 0) {
+                    callback(candidates);
+                    return;
+                }
+            }
+
+            /*
+             * 其他路線維持原本邏輯
+             */
             for (var k = 0; k < mapped.length; k++) {
                 if (containsLohasKeyword(mapped[k].name_tc + " " + mapped[k].name_en)) {
                     candidates.push(mapped[k]);
@@ -456,11 +552,16 @@ function findKmbCandidateStops(routeConfig, callback) {
 }
 
 function fetchKmbEta(routeConfig, stopId, callback) {
-    var url = "https://data.etabus.gov.hk/v1/transport/kmb/eta/" + stopId + "/" + routeConfig.route + "/" + routeConfig.serviceType;
+    var url = "https://data.etabus.gov.hk/v1/transport/kmb/eta/" +
+              stopId + "/" +
+              routeConfig.route + "/" +
+              routeConfig.serviceType;
+
     ajaxGetJson(url, function(err, json) {
-        var rawList = (json && Array.isArray(json.data)) ? json.data : [];
-        
+        var rawList = json && Array.isArray(json.data) ? json.data : [];
+
         var list = [];
+
         for (var i = 0; i < rawList.length; i++) {
             if (rawList[i] && rawList[i].eta && rawList[i].dir === routeConfig.dir) {
                 list.push(rawList[i]);
@@ -476,6 +577,7 @@ function fetchKmbEta(routeConfig, stopId, callback) {
             for (var n = 0; n < list.length - 1 - m; n++) {
                 var tA = parseEtaTime(list[n].eta);
                 var tB = parseEtaTime(list[n + 1].eta);
+
                 if (tA && tB && tA > tB) {
                     var temp = list[n];
                     list[n] = list[n + 1];
@@ -485,6 +587,7 @@ function fetchKmbEta(routeConfig, stopId, callback) {
         }
 
         var mins = getMinutesLeft(list[0].eta);
+
         if (mins === null) {
             callback(null);
             return;
@@ -510,7 +613,7 @@ function fetchOneKmbRoute(routeConfig) {
             checkBusRequestsComplete();
             return;
         }
-        
+
         function tryNext(index) {
             if (index >= candidates.length) {
                 finalBusResults.push(createNoEtaRoute(routeConfig));
@@ -529,19 +632,24 @@ function fetchOneKmbRoute(routeConfig) {
                 }
             });
         }
+
         tryNext(0);
     });
 }
 
-/************************************************************
- * 6. 城巴數據獲取（純手動過濾方向）
- ************************************************************/
+/********************
+ * 6. 城巴 ETA
+ ********************/
 function fetchCitybusEta(routeConfig) {
-    var url = "https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/" + routeConfig.stopId + "/" + routeConfig.route;
+    var url = "https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/" +
+              routeConfig.stopId + "/" +
+              routeConfig.route;
+
     ajaxGetJson(url, function(err, json) {
-        var rawList = (json && Array.isArray(json.data)) ? json.data : [];
-        
+        var rawList = json && Array.isArray(json.data) ? json.data : [];
+
         var list = [];
+
         for (var i = 0; i < rawList.length; i++) {
             if (rawList[i] && rawList[i].eta && rawList[i].dir === routeConfig.dir) {
                 list.push(rawList[i]);
@@ -559,6 +667,7 @@ function fetchCitybusEta(routeConfig) {
             for (var n = 0; n < list.length - 1 - m; n++) {
                 var tA = parseEtaTime(list[n].eta);
                 var tB = parseEtaTime(list[n + 1].eta);
+
                 if (tA && tB && tA > tB) {
                     var temp = list[n];
                     list[n] = list[n + 1];
@@ -568,6 +677,7 @@ function fetchCitybusEta(routeConfig) {
         }
 
         var mins = getMinutesLeft(list[0].eta);
+
         if (mins === null) {
             finalBusResults.push(createNoEtaRoute(routeConfig));
         } else {
@@ -581,17 +691,21 @@ function fetchCitybusEta(routeConfig) {
                 stopId: routeConfig.stopId
             });
         }
+
         completedBusRequests++;
         checkBusRequestsComplete();
     });
 }
 
-/************************************************************
- * 7. 總調度與控制
- ************************************************************/
+/********************
+ * 7. 總調度
+ ********************/
 function updateAllData() {
     var status = document.getElementById("update-status");
-    if (status) status.innerText = "正在更新數據...";
+
+    if (status) {
+        status.innerText = "正在更新數據...";
+    }
 
     finalBusResults = [];
     completedBusRequests = 0;
@@ -600,6 +714,7 @@ function updateAllData() {
 
     for (var i = 0; i < BUS_ROUTES.length; i++) {
         var rConfig = BUS_ROUTES[i];
+
         if (rConfig.company === "kmb") {
             fetchOneKmbRoute(rConfig);
         } else if (rConfig.company === "ctb") {
